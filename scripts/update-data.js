@@ -12,12 +12,17 @@ const outUrl = new URL("../data/app-data.json", import.meta.url);
 const cacheUrl = new URL("../data/geocode-cache.json", import.meta.url);
 
 const AGE_KEYS = ["0-9", "10-19", "20-29", "30-39", "40-49", "50-59", "60-69", "70-79", "80+"];
+const WARD_CODES = [
+  "23101", "23102", "23103", "23104", "23105", "23106", "23107", "23108",
+  "23109", "23110", "23111", "23112", "23113", "23114", "23115", "23116"
+];
 
 async function main() {
   await mkdir(new URL("../data/", import.meta.url), { recursive: true });
   const cache = await readJson(cacheUrl, {});
+  const townBoundaries = await loadTownBoundaries();
   const parks = await loadParks(cache);
-  const towns = await loadPopulation(cache);
+  const towns = await loadPopulation(cache, townBoundaries);
 
   await writeFile(cacheUrl, `${JSON.stringify(cache, null, 2)}\n`, "utf8");
   await writeFile(outUrl, `${JSON.stringify({
@@ -68,7 +73,7 @@ function csvUrls(html, baseUrl) {
     .map((href) => new URL(href, baseUrl).toString())
     .filter((url) => /20250401.*\.csv$/i.test(url));
 }
-async function loadPopulation(cache) {
+async function loadPopulation(cache, townBoundaries) {
   const page = await fetchText(config.populationPageUrl, "utf8");
   const excelUrl = latestExcelUrl(page);
   if (!excelUrl) throw new Error("Population Excel link was not found.");
@@ -105,7 +110,89 @@ async function loadPopulation(cache) {
       });
     }
   }
-  return towns.filter((town) => Number.isFinite(town.lat) && Number.isFinite(town.lng));
+  return towns
+    .filter((town) => Number.isFinite(town.lat) && Number.isFinite(town.lng))
+    .map((town) => attachTownBoundary(town, townBoundaries));
+}
+
+async function loadTownBoundaries() {
+  const boundaries = new Map();
+  for (const code of WARD_CODES) {
+    const url = `https://geoshape.ex.nii.ac.jp/ka/topojson/2020/23/r2ka${code}.topojson`;
+    const topojson = await fetchJson(url);
+    for (const feature of topojsonToFeatures(topojson, topojson.objects.town)) {
+      const ward = feature.properties.CITY_NAME?.replace(/^名古屋市/, "");
+      if (!ward || !feature.properties.S_NAME) continue;
+      const rings = feature.geometry.rings.map((ring) => simplifyRing(ring));
+      const boundary = {
+        name: feature.properties.S_NAME,
+        rings,
+        bbox: bboxForRings(rings)
+      };
+      if (!boundaries.has(ward)) boundaries.set(ward, []);
+      boundaries.get(ward).push(boundary);
+    }
+  }
+  return boundaries;
+}
+
+function attachTownBoundary(town, townBoundaries) {
+  const boundaries = townBoundaries.get(town.ward) ?? [];
+  const matches = boundaries.filter((boundary) => boundary.name === town.name || boundary.name.startsWith(`${town.name}字`));
+  if (!matches.length) return town;
+  const rings = matches.flatMap((boundary) => boundary.rings);
+  return {
+    ...town,
+    polygons: rings,
+    bbox: bboxForRings(rings)
+  };
+}
+
+function topojsonToFeatures(topojson, collection) {
+  return collection.geometries.flatMap((geometry) => {
+    const polygons = geometry.type === "Polygon"
+      ? [geometry.arcs]
+      : geometry.type === "MultiPolygon"
+        ? geometry.arcs
+        : [];
+    if (!polygons.length) return [];
+    return [{
+      properties: geometry.properties ?? {},
+      geometry: {
+        rings: polygons.flatMap((polygon) => polygon.map((ring) => arcRing(topojson, ring)))
+      }
+    }];
+  });
+}
+
+function arcRing(topojson, ring) {
+  const points = ring.flatMap((arcIndex) => {
+    const reversed = arcIndex < 0;
+    const arc = topojson.arcs[reversed ? ~arcIndex : arcIndex];
+    return (reversed ? [...arc].reverse() : arc).map(([lng, lat]) => [roundCoord(lng), roundCoord(lat)]);
+  });
+  return points.filter((point, index) => index === 0 || point[0] !== points[index - 1][0] || point[1] !== points[index - 1][1]);
+}
+
+function simplifyRing(ring) {
+  return ring.filter((point, index) => index === 0 || index === ring.length - 1 || index % 2 === 0);
+}
+
+function bboxForRings(rings) {
+  const bbox = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const ring of rings) {
+    for (const [lng, lat] of ring) {
+      bbox[0] = Math.min(bbox[0], lng);
+      bbox[1] = Math.min(bbox[1], lat);
+      bbox[2] = Math.max(bbox[2], lng);
+      bbox[3] = Math.max(bbox[3], lat);
+    }
+  }
+  return bbox.every(Number.isFinite) ? bbox.map(roundCoord) : null;
+}
+
+function roundCoord(value) {
+  return Math.round(value * 1e6) / 1e6;
 }
 
 function latestExcelUrl(html) {

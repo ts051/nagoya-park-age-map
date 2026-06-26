@@ -394,9 +394,75 @@ function calculateParkStats(park) {
 
 function nearbyTowns(park, radiusMeters) {
   return state.data.towns
-    .map((town) => ({ ...town, distance: distanceMeters(park.lat, park.lng, town.lat, town.lng) }))
-    .filter((town) => town.distance <= radiusMeters)
+    .map((town) => ({ ...town, distance: townDistanceMeters(park, town) }))
+    .filter((town) => townInRadius(park, town, radiusMeters))
     .sort((a, b) => a.distance - b.distance);
+}
+
+function townInRadius(park, town, radiusMeters) {
+  if (!Array.isArray(town.polygons) || !town.polygons.length) {
+    return distanceMeters(park.lat, park.lng, town.lat, town.lng) <= radiusMeters;
+  }
+  if (town.bbox && !circleIntersectsBbox(park, radiusMeters, town.bbox)) return false;
+  return town.polygons.some((ring) => circleIntersectsRing(park, radiusMeters, ring));
+}
+
+function townDistanceMeters(park, town) {
+  if (!Array.isArray(town.polygons) || !town.polygons.length) {
+    return distanceMeters(park.lat, park.lng, town.lat, town.lng);
+  }
+  if (town.polygons.some((ring) => pointInRing([park.lng, park.lat], ring))) return 0;
+  return Math.min(...town.polygons.flatMap((ring) => ring.map(([lng, lat]) => distanceMeters(park.lat, park.lng, lat, lng))));
+}
+
+function circleIntersectsBbox(park, radiusMeters, bbox) {
+  const latDelta = radiusMeters / 111320;
+  const lngDelta = radiusMeters / (111320 * Math.max(0.2, Math.cos((park.lat * Math.PI) / 180)));
+  return !(bbox[2] < park.lng - lngDelta
+    || bbox[0] > park.lng + lngDelta
+    || bbox[3] < park.lat - latDelta
+    || bbox[1] > park.lat + latDelta);
+}
+
+function circleIntersectsRing(park, radiusMeters, ring) {
+  const point = [park.lng, park.lat];
+  if (pointInRing(point, ring)) return true;
+  for (let i = 0; i < ring.length; i += 1) {
+    const [lng, lat] = ring[i];
+    if (distanceMeters(park.lat, park.lng, lat, lng) <= radiusMeters) return true;
+    const next = ring[(i + 1) % ring.length];
+    if (distancePointToSegmentMeters(park, [lng, lat], next) <= radiusMeters) return true;
+  }
+  return false;
+}
+
+function pointInRing(point, ring) {
+  let inside = false;
+  const [x, y] = point;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    const intersects = ((yi > y) !== (yj > y))
+      && (x < ((xj - xi) * (y - yi)) / (yj - yi) + xi);
+    if (intersects) inside = !inside;
+  }
+  return inside;
+}
+
+function distancePointToSegmentMeters(park, start, end) {
+  const originLat = (park.lat * Math.PI) / 180;
+  const toXY = ([lng, lat]) => ({
+    x: (lng - park.lng) * 111320 * Math.cos(originLat),
+    y: (lat - park.lat) * 111320
+  });
+  const a = toXY(start);
+  const b = toXY(end);
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSquared = dx * dx + dy * dy;
+  if (!lengthSquared) return Math.hypot(a.x, a.y);
+  const t = Math.max(0, Math.min(1, -((a.x * dx + a.y * dy) / lengthSquared)));
+  return Math.hypot(a.x + dx * t, a.y + dy * t);
 }
 
 function sumAgeGroups(towns) {
