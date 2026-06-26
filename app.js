@@ -118,7 +118,7 @@ function toggleHelpPanel() {
       <li>区域を選ぶと、表示する公園を名古屋市全体または各区に絞り込めます。</li>
       <li>公園名を選ばない場合は、選択中の区域全体の人口構成を確認できます。</li>
       <li>公園名を選ぶと、その公園を中心にマップが移動し、周辺の年齢構成を確認できます。</li>
-      <li>周辺判定では、公園から何m以内の町丁目人口を集計するかを切り替えられます。</li>
+      <li>周辺判定では、公園から何m以内の町丁目人口を集計するかを切り替えられます。範囲にまたがる町丁目は、重なった面積に応じて人口を按分します。</li>
       <li>年齢層ボタンを選ぶと、その年齢層が多い公園だけをマップに表示できます。複数選択も可能です。</li>
       <li>全選択を押すと、すべての年齢層の表示非表示を切り替えられます。</li>
       <li>マップ上の丸いプロットの色は、公園周辺で最も多い年齢層を表します。</li>
@@ -394,25 +394,35 @@ function calculateParkStats(park) {
 
 function nearbyTowns(park, radiusMeters) {
   return state.data.towns
-    .map((town) => ({ ...town, distance: townDistanceMeters(park, town) }))
-    .filter((town) => townInRadius(park, town, radiusMeters))
+    .map((town) => weightedTownInRadius(park, town, radiusMeters))
+    .filter(Boolean)
     .sort((a, b) => a.distance - b.distance);
 }
 
-function townInRadius(park, town, radiusMeters) {
+function weightedTownInRadius(park, town, radiusMeters) {
   if (!Array.isArray(town.polygons) || !town.polygons.length) {
-    return distanceMeters(park.lat, park.lng, town.lat, town.lng) <= radiusMeters;
+    const distance = distanceMeters(park.lat, park.lng, town.lat, town.lng);
+    return distance <= radiusMeters ? { ...town, distance, weight: 1 } : null;
   }
-  if (town.bbox && !circleIntersectsBbox(park, radiusMeters, town.bbox)) return false;
-  return town.polygons.some((ring) => circleIntersectsRing(park, radiusMeters, ring));
-}
+  if (town.bbox && !circleIntersectsBbox(park, radiusMeters, town.bbox)) return null;
 
-function townDistanceMeters(park, town) {
-  if (!Array.isArray(town.polygons) || !town.polygons.length) {
-    return distanceMeters(park.lat, park.lng, town.lat, town.lng);
+  let totalArea = 0;
+  let overlapArea = 0;
+  let minDistance = Infinity;
+  for (const ring of town.polygons) {
+    const projected = ring.map((point) => projectPointMeters(park, point));
+    const ringArea = Math.abs(polygonArea(projected));
+    if (!ringArea) continue;
+    const clipped = clipPolygonToCircle(projected, radiusMeters);
+    totalArea += ringArea;
+    overlapArea += Math.abs(polygonArea(clipped));
+    minDistance = Math.min(minDistance, distanceToRingMeters(projected));
   }
-  if (town.polygons.some((ring) => pointInRing([park.lng, park.lat], ring))) return 0;
-  return Math.min(...town.polygons.flatMap((ring) => ring.map(([lng, lat]) => distanceMeters(park.lat, park.lng, lat, lng))));
+
+  if (!totalArea || !overlapArea) return null;
+  const weight = Math.min(1, overlapArea / totalArea);
+  if (weight <= 0) return null;
+  return { ...town, distance: Number.isFinite(minDistance) ? minDistance : 0, weight };
 }
 
 function circleIntersectsBbox(park, radiusMeters, bbox) {
@@ -424,19 +434,72 @@ function circleIntersectsBbox(park, radiusMeters, bbox) {
     || bbox[1] > park.lat + latDelta);
 }
 
-function circleIntersectsRing(park, radiusMeters, ring) {
-  const point = [park.lng, park.lat];
-  if (pointInRing(point, ring)) return true;
-  for (let i = 0; i < ring.length; i += 1) {
-    const [lng, lat] = ring[i];
-    if (distanceMeters(park.lat, park.lng, lat, lng) <= radiusMeters) return true;
-    const next = ring[(i + 1) % ring.length];
-    if (distancePointToSegmentMeters(park, [lng, lat], next) <= radiusMeters) return true;
-  }
-  return false;
+function projectPointMeters(park, [lng, lat]) {
+  return [
+    (lng - park.lng) * 111320 * Math.cos((park.lat * Math.PI) / 180),
+    (lat - park.lat) * 111320
+  ];
 }
 
-function pointInRing(point, ring) {
+function clipPolygonToCircle(points, radiusMeters) {
+  const circle = circlePolygon(radiusMeters);
+  return circle.reduce((subject, edgeEnd, index) => {
+    if (!subject.length) return subject;
+    const edgeStart = circle[(index + circle.length - 1) % circle.length];
+    return clipPolygonToEdge(subject, edgeStart, edgeEnd);
+  }, points);
+}
+
+function circlePolygon(radiusMeters) {
+  return Array.from({ length: 48 }, (_, index) => {
+    const angle = (index / 48) * Math.PI * 2;
+    return [Math.cos(angle) * radiusMeters, Math.sin(angle) * radiusMeters];
+  });
+}
+
+function clipPolygonToEdge(points, edgeStart, edgeEnd) {
+  const clipped = [];
+  for (let i = 0; i < points.length; i += 1) {
+    const current = points[i];
+    const previous = points[(i + points.length - 1) % points.length];
+    const currentInside = leftOfEdge(edgeStart, edgeEnd, current) >= 0;
+    const previousInside = leftOfEdge(edgeStart, edgeEnd, previous) >= 0;
+    if (currentInside && !previousInside) clipped.push(lineIntersection(previous, current, edgeStart, edgeEnd));
+    if (currentInside) clipped.push(current);
+    if (!currentInside && previousInside) clipped.push(lineIntersection(previous, current, edgeStart, edgeEnd));
+  }
+  return clipped.filter(Boolean);
+}
+
+function leftOfEdge(a, b, point) {
+  return ((b[0] - a[0]) * (point[1] - a[1])) - ((b[1] - a[1]) * (point[0] - a[0]));
+}
+
+function lineIntersection(a, b, c, d) {
+  const abx = b[0] - a[0];
+  const aby = b[1] - a[1];
+  const cdx = d[0] - c[0];
+  const cdy = d[1] - c[1];
+  const denominator = (abx * cdy) - (aby * cdx);
+  if (Math.abs(denominator) < 1e-9) return b;
+  const t = (((c[0] - a[0]) * cdy) - ((c[1] - a[1]) * cdx)) / denominator;
+  return [a[0] + (abx * t), a[1] + (aby * t)];
+}
+
+function polygonArea(points) {
+  if (points.length < 3) return 0;
+  return points.reduce((sum, point, index) => {
+    const next = points[(index + 1) % points.length];
+    return sum + ((point[0] * next[1]) - (next[0] * point[1]));
+  }, 0) / 2;
+}
+
+function distanceToRingMeters(points) {
+  if (pointInProjectedRing([0, 0], points)) return 0;
+  return Math.min(...points.map(([x, y]) => Math.hypot(x, y)));
+}
+
+function pointInProjectedRing(point, ring) {
   let inside = false;
   const [x, y] = point;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i, i += 1) {
@@ -449,28 +512,16 @@ function pointInRing(point, ring) {
   return inside;
 }
 
-function distancePointToSegmentMeters(park, start, end) {
-  const originLat = (park.lat * Math.PI) / 180;
-  const toXY = ([lng, lat]) => ({
-    x: (lng - park.lng) * 111320 * Math.cos(originLat),
-    y: (lat - park.lat) * 111320
-  });
-  const a = toXY(start);
-  const b = toXY(end);
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const lengthSquared = dx * dx + dy * dy;
-  if (!lengthSquared) return Math.hypot(a.x, a.y);
-  const t = Math.max(0, Math.min(1, -((a.x * dx + a.y * dy) / lengthSquared)));
-  return Math.hypot(a.x + dx * t, a.y + dy * t);
-}
-
 function sumAgeGroups(towns) {
   const result = Object.fromEntries(AGE_GROUPS.map(([key]) => [key, 0]));
   for (const town of towns) {
+    const weight = Number.isFinite(town.weight) ? town.weight : 1;
     for (const key of Object.keys(result)) {
-      result[key] += Number(town.population[key] ?? 0);
+      result[key] += Number(town.population[key] ?? 0) * weight;
     }
+  }
+  for (const key of Object.keys(result)) {
+    result[key] = Math.round(result[key]);
   }
   return result;
 }
