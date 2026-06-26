@@ -3,6 +3,7 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 const fileConfig = JSON.parse(await readFile(new URL("../data/source-config.json", import.meta.url), "utf8"));
 const config = {
   ...fileConfig,
+  parksPageUrl: process.env.NAGOYA_PARKS_PAGE_URL || fileConfig.parksPageUrl,
   populationPageUrl: process.env.NAGOYA_POPULATION_PAGE_URL || fileConfig.populationPageUrl,
   populationAsOf: process.env.NAGOYA_POPULATION_AS_OF || fileConfig.populationAsOf,
   parksAsOf: process.env.NAGOYA_PARKS_AS_OF || fileConfig.parksAsOf
@@ -33,35 +34,40 @@ async function main() {
 }
 
 async function loadParks(cache) {
-  const url = `${config.ckanBase}/package_show?id=${encodeURIComponent(config.parksPackageName)}`;
-  const pkg = await fetchJson(url);
-  const resources = pkg.result.resources.filter((resource) => resource.format?.toUpperCase() === "CSV");
+  const page = await fetchText(config.parksPageUrl, "utf8");
+  const resources = csvUrls(page, config.parksPageUrl);
   const parks = [];
 
-  for (const resource of resources) {
-    const csv = await fetchText(resource.url, "shift_jis");
+  for (const [position, url] of resources.entries()) {
+    const csv = await fetchText(url, "shift_jis");
     for (const row of parseCsv(csv)) {
       const no = Number(row["No."] ?? row.No);
-      const name = row["名称"] ?? row["名　　称"] ?? row.name;
-      const address = row["所在地"] ?? row["所　　在　　地"] ?? row.address;
+      const name = row["名称"] ?? row.name;
+      const address = row["所在地"] ?? row.address;
       if (!no || !name || !address) continue;
       const key = `${name}|${address}`;
       cache[key] ??= await geocode(`名古屋市 ${address}`);
       if (!cache[key]) continue;
       parks.push({
-        id: slug(`${resource.position}-${no}-${name}`),
+        id: slug(`${position}-${no}-${name}`),
         name,
         ward: wardFromAddress(address),
         address,
         lat: cache[key].lat,
         lng: cache[key].lng,
-        areaHa: numberFrom(row["面積\n（ha）"] ?? row["面積（ha）"] ?? row.areaHa)
+        areaHa: numberFrom(row["面積（ha）"] ?? row["面積(ha)"] ?? row.areaHa)
       });
     }
   }
   return parks;
 }
 
+function csvUrls(html, baseUrl) {
+  return [...html.matchAll(/href=["']([^"']+\.csv[^"']*)["']/gi)]
+    .map((match) => match[1].replace(/&amp;/g, "&"))
+    .map((href) => new URL(href, baseUrl).toString())
+    .filter((url) => /20250401.*\.csv$/i.test(url));
+}
 async function loadPopulation(cache) {
   const page = await fetchText(config.populationPageUrl, "utf8");
   const excelUrl = latestExcelUrl(page);
@@ -178,7 +184,7 @@ function numberFrom(value) {
 }
 
 function wardFromAddress(address) {
-  return address.match(/名古屋市?([^市\s]+区)|([^市\s]+区)/)?.[1] ?? address.match(/([^市\s]+区)/)?.[1] ?? "";
+  return address.match(/名古屋市([^市\s]+区)|([^市\s]+区)/)?.[1] ?? address.match(/([^市\s]+区)/)?.[1] ?? "";
 }
 
 function slug(value) {
