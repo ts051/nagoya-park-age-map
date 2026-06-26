@@ -1,0 +1,15 @@
+{
+  "name": "nagoya-park-age-map",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx --yes serve .",
+    "update:data": "node scripts/update-data.js",
+    "validate": "node scripts/validate-data.js"
+  },
+  "devDependencies": {
+    "serve": "^14.2.4",
+    "xlsx": "^0.18.5"
+  }
+}

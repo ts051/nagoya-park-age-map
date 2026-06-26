@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Population pyramid">
+  <rect width="128" height="128" rx="24" fill="#e4f3e7"/>
+  <rect x="60" y="22" width="8" height="84" rx="4" fill="#164a32"/>
+  <rect x="36" y="30" width="22" height="8" rx="3" fill="#0f5132"/>
+  <rect x="70" y="30" width="22" height="8" rx="3" fill="#0f5132"/>
+  <rect x="28" y="44" width="30" height="8" rx="3" fill="#0d5b36"/>
+  <rect x="70" y="44" width="30" height="8" rx="3" fill="#0d5b36"/>
+  <rect x="22" y="58" width="36" height="8" rx="3" fill="#0b673b"/>
+  <rect x="70" y="58" width="36" height="8" rx="3" fill="#0b673b"/>
+  <rect x="16" y="72" width="42" height="8" rx="3" fill="#0a7440"/>
+  <rect x="70" y="72" width="42" height="8" rx="3" fill="#0a7440"/>
+  <rect x="10" y="86" width="48" height="8" rx="3" fill="#087f45"/>
+  <rect x="70" y="86" width="48" height="8" rx="3" fill="#087f45"/>
+  <rect x="22" y="104" width="84" height="6" rx="3" fill="#164a32"/>
+</svg>

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Nagoya ParkAgeScape</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/population-pyramid.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+    <link rel="stylesheet" href="./vendor/leaflet/leaflet.css" />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="sidebar" aria-label="公園と人口構成">
+        <div class="sidebar-head">
+          <div class="brand">
+            <span class="brand-mark" aria-hidden="true"></span>
+            <div class="brand-content">
+              <div class="title-row">
+                <h1>Nagoya ParkAgeScape</h1>
+                <button class="help-button" id="help-button" type="button" aria-expanded="false" aria-controls="help-panel" aria-label="使い方を表示">?</button>
+              </div>
+              <p id="dataset-note">データを読み込み中</p>
+            </div>
+          </div>
+
+          <div class="controls">
+            <label>
+              区域
+              <select id="ward-select"></select>
+            </label>
+            <label>
+              公園名
+              <select id="park-select"></select>
+            </label>
+            <label>
+              周辺判定
+              <select id="radius-select">
+                <option value="500">500m</option>
+                <option value="800" selected>800m</option>
+                <option value="1200">1.2km</option>
+                <option value="2000">2km</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="age-filter">
+            <button class="all-ages-button" id="all-ages-button" type="button">全選択</button>
+            <div class="age-legend" id="age-legend" aria-label="年齢層の色分け"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="map-panel" aria-label="地図">
+        <div id="map"></div>
+        <aside class="detail-panel" id="detail-panel">
+          <p class="muted">公園を選択すると、周辺町丁目の年齢構成を表示します。</p>
+        </aside>
+      </section>
+    </main>
+
+    <script src="./vendor/leaflet/leaflet.js"></script>
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

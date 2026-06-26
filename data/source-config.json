@@ -1,0 +1,11 @@
+{
+  "ckanBase": "https://data.bodik.jp/api/3/action",
+  "organization": "231002",
+  "parksPackageName": "231002_171310000_001",
+  "populationDatasetSearch": "令和8年 町・丁目(大字)別、年齢(10歳階級)別公簿人口",
+  "populationPageUrl": "https://www.city.nagoya.jp/shisei/toukei/1003703/1003706/1003739/1045212.html",
+  "populationAsOf": "2026-06-01",
+  "parksAsOf": "2024-04-01",
+  "townGeoJsonPath": "./data/town-boundaries.geojson",
+  "sourceCredit": "名古屋市オープンデータカタログサイト、統計なごやweb版"
+}
