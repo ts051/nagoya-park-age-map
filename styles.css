@@ -26,13 +26,19 @@ body {
 .app-shell {
   display: grid;
   grid-template-columns: 390px 1fr;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    "sidebar map"
+    "detail map";
   height: 100vh;
   overflow: hidden;
 }
 
 .sidebar {
+  grid-area: sidebar;
   padding: 20px;
   border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
   background: var(--surface);
   overflow: auto;
 }
@@ -252,8 +258,10 @@ select {
 }
 
 .map-panel {
+  grid-area: map;
   position: relative;
   min-width: 0;
+  min-height: 0;
 }
 
 #map {
@@ -262,18 +270,12 @@ select {
 }
 
 .detail-panel {
-  position: absolute;
-  right: 18px;
-  bottom: 18px;
-  z-index: 500;
-  width: min(430px, calc(100% - 36px));
-  max-height: calc(100vh - 36px);
+  grid-area: detail;
+  min-height: 0;
   overflow: auto;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+  border-right: 1px solid var(--line);
   padding: 16px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: var(--shadow);
+  background: var(--surface);
 }
 
 .detail-title {
@@ -371,6 +373,11 @@ select {
 
   .app-shell {
     grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    grid-template-areas:
+      "sidebar"
+      "map"
+      "detail";
     height: auto;
     overflow: visible;
   }
@@ -410,10 +417,8 @@ select {
   }
 
   .detail-panel {
-    position: static;
     width: 100%;
     max-height: none;
-    border-radius: 0;
-    box-shadow: none;
+    border-right: 0;
   }
 }
