@@ -5,6 +5,7 @@ const data = JSON.parse(await readFile(new URL("../data/app-data.json", import.m
 const errors = [];
 if (!Array.isArray(data.parks) || data.parks.length === 0) errors.push("parks is empty");
 if (!Array.isArray(data.towns) || data.towns.length === 0) errors.push("towns is empty");
+if (!data.meta?.updatedAt) errors.push("meta.updatedAt is missing");
 
 for (const park of data.parks ?? []) {
   if (!park.id || !park.name) errors.push(`park has no id/name: ${JSON.stringify(park)}`);

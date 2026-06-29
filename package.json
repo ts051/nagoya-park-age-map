@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "npx --yes serve .",
+    "export:coordinate-review": "node scripts/export-coordinate-review.js",
+    "fetch:data": "node scripts/update-data.js",
     "update:data": "node scripts/update-data.js",
     "validate": "node scripts/validate-data.js"
   },

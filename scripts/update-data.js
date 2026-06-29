@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
 
 const fileConfig = JSON.parse(await readFile(new URL("../data/source-config.json", import.meta.url), "utf8"));
 const config = {
@@ -10,8 +10,12 @@ const config = {
 };
 const outUrl = new URL("../data/app-data.json", import.meta.url);
 const cacheUrl = new URL("../data/geocode-cache.json", import.meta.url);
+const overrideUrl = new URL("../data/park-coordinate-overrides.csv", import.meta.url);
 
 const AGE_KEYS = ["0-9", "10-19", "20-29", "30-39", "40-49", "50-59", "60-69", "70-79", "80+"];
+const OSM_PARK_BBOX = [35.02, 136.78, 35.27, 137.10];
+const OSM_PARK_CACHE_KEY = "osmParkPois|named-leisure-landuse|nagoya-bbox-v3";
+const OSM_PARK_MAX_DISTANCE_METERS = 1500;
 const WARD_CODES = [
   "23101", "23102", "23103", "23104", "23105", "23106", "23107", "23108",
   "23109", "23110", "23111", "23112", "23113", "23114", "23115", "23116"
@@ -21,26 +25,31 @@ async function main() {
   await mkdir(new URL("../data/", import.meta.url), { recursive: true });
   const cache = await readJson(cacheUrl, {});
   const townBoundaries = await loadTownBoundaries();
-  const parks = await loadParks(cache);
+  const coordinateOverrides = await loadCoordinateOverrides();
+  const parkPois = await loadOsmParkPois(cache);
+  const parks = await loadParks(cache, parkPois, coordinateOverrides);
   const towns = await loadPopulation(cache, townBoundaries);
-
-  await writeFile(cacheUrl, `${JSON.stringify(cache, null, 2)}\n`, "utf8");
-  await writeFile(outUrl, `${JSON.stringify({
+  const output = {
     meta: {
       parksAsOf: config.parksAsOf,
       populationAsOf: config.populationAsOf,
+      updatedAt: new Date().toISOString(),
       sourceCredit: config.sourceCredit,
       isSample: false
     },
     parks,
     towns
-  }, null, 2)}\n`, "utf8");
+  };
+
+  assertUsableData(output);
+
+  await writeFile(cacheUrl, `${JSON.stringify(cache, null, 2)}\n`, "utf8");
+  await writeJsonAtomic(outUrl, output);
   console.log(`Wrote ${parks.length} parks and ${towns.length} towns.`);
 }
 
-async function loadParks(cache) {
-  const page = await fetchText(config.parksPageUrl, "utf8");
-  const resources = csvUrls(page, config.parksPageUrl);
+async function loadParks(cache, parkPois, coordinateOverrides) {
+  const resources = await ckanCsvResources(config.parksPackageName);
   const parks = [];
 
   for (const [position, url] of resources.entries()) {
@@ -52,14 +61,20 @@ async function loadParks(cache) {
       if (!no || !name || !address) continue;
       const key = `${name}|${address}`;
       cache[key] ??= await geocode(`名古屋市 ${address}`);
-      if (!cache[key]) continue;
+      const addressPoint = cache[key];
+      if (!addressPoint) continue;
+      const overridePoint = coordinateOverrideFor(name, address, coordinateOverrides);
+      const poiPoint = nearestParkPoi(name, addressPoint, parkPois);
+      const point = overridePoint ?? poiPoint ?? addressPoint;
       parks.push({
         id: slug(`${position}-${no}-${name}`),
         name,
         ward: wardFromAddress(address),
         address,
-        lat: cache[key].lat,
-        lng: cache[key].lng,
+        lat: point.lat,
+        lng: point.lng,
+        coordinateSource: overridePoint?.source ?? (poiPoint ? "osm-park-poi" : "gsi-address"),
+        osmId: overridePoint ? undefined : poiPoint?.osmId,
         areaHa: numberFrom(row["面積（ha）"] ?? row["面積(ha)"] ?? row.areaHa)
       });
     }
@@ -67,11 +82,111 @@ async function loadParks(cache) {
   return parks;
 }
 
-function csvUrls(html, baseUrl) {
-  return [...html.matchAll(/href=["']([^"']+\.csv[^"']*)["']/gi)]
-    .map((match) => match[1].replace(/&amp;/g, "&"))
-    .map((href) => new URL(href, baseUrl).toString())
-    .filter((url) => /20250401.*\.csv$/i.test(url));
+async function loadOsmParkPois(cache) {
+  if (Array.isArray(cache[OSM_PARK_CACHE_KEY]) && cache[OSM_PARK_CACHE_KEY].length) {
+    return cache[OSM_PARK_CACHE_KEY];
+  }
+
+  try {
+    const [south, west, north, east] = OSM_PARK_BBOX;
+    const query = `[out:json][timeout:60];(
+nwr["leisure"]["name"](${south},${west},${north},${east});
+nwr["landuse"~"^(grass|recreation_ground|village_green|forest)$"]["name"](${south},${west},${north},${east});
+);out center tags;`;
+    const endpoint = process.env.OVERPASS_API_URL || "https://overpass-api.de/api/interpreter";
+    const url = `${endpoint}?data=${encodeURIComponent(query)}`;
+    const json = await fetchJson(url);
+    const pois = (json.elements ?? [])
+      .map(osmParkElementToPoi)
+      .filter(Boolean);
+    cache[OSM_PARK_CACHE_KEY] = pois;
+    return pois;
+  } catch (error) {
+    console.warn(`OSM park POI fetch failed; falling back to address points. ${error.message}`);
+    return [];
+  }
+}
+
+async function loadCoordinateOverrides() {
+  const text = await readText(overrideUrl, "");
+  if (!text.trim()) return [];
+  return parseCsvRecords(text)
+    .map((row) => ({
+      name: clean(row.name),
+      address: clean(row.address),
+      key: coordinateOverrideKey(row.name, row.address),
+      lat: Number(row.lat),
+      lng: Number(row.lng),
+      source: clean(row.source) || "manual-override"
+    }))
+    .filter((row) => row.name && Number.isFinite(row.lat) && Number.isFinite(row.lng));
+}
+
+function coordinateOverrideFor(name, address, coordinateOverrides) {
+  const key = coordinateOverrideKey(name, address);
+  return coordinateOverrides.find((override) => override.key === key) ?? null;
+}
+
+function coordinateOverrideKey(name, address) {
+  return `${normalizeParkName(name)}|${normalizeAddress(address)}`;
+}
+
+function osmParkElementToPoi(element) {
+  const name = element.tags?.name;
+  const lat = element.lat ?? element.center?.lat;
+  const lng = element.lon ?? element.center?.lon;
+  if (!name || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return {
+    name,
+    keys: parkNameKeys(name),
+    lat: roundCoord(lat),
+    lng: roundCoord(lng),
+    osmId: `${element.type}/${element.id}`
+  };
+}
+
+function nearestParkPoi(name, addressPoint, parkPois) {
+  const keys = parkNameKeys(name);
+  const candidates = parkPois
+    .filter((poi) => poi.keys.some((key) => keys.includes(key)))
+    .map((poi) => ({
+      ...poi,
+      distance: distanceMeters(addressPoint.lat, addressPoint.lng, poi.lat, poi.lng)
+    }))
+    .filter((poi) => poi.distance <= OSM_PARK_MAX_DISTANCE_METERS)
+    .sort((a, b) => a.distance - b.distance);
+  return candidates[0] ?? null;
+}
+
+async function ckanCsvResources(packageName) {
+  if (!packageName) throw new Error("parksPackageName is missing in data/source-config.json.");
+  const packageData = await fetchCkanAction("package_show", { id: packageName });
+  const resources = packageData.resources ?? [];
+  const csvResources = resources
+    .filter((resource) => resource.url && isCsvResource(resource))
+    .map((resource) => resource.url.replace(/&amp;/g, "&"));
+  const asOf = String(config.parksAsOf ?? "").replaceAll("-", "");
+  const datedResources = asOf
+    ? csvResources.filter((url) => url.includes(asOf))
+    : [];
+  const selected = datedResources.length ? datedResources : csvResources;
+  if (!selected.length) throw new Error(`No CSV resources were found in CKAN package: ${packageName}`);
+  return selected;
+}
+
+function isCsvResource(resource) {
+  return String(resource.format ?? "").toLowerCase().includes("csv")
+    || /\.csv(?:$|[?#])/i.test(resource.url);
+}
+
+async function fetchCkanAction(action, params) {
+  const url = new URL(`${config.ckanBase.replace(/\/$/, "")}/${action}`);
+  for (const [key, value] of Object.entries(params)) {
+    url.searchParams.set(key, value);
+  }
+  const response = await fetchJson(url);
+  if (!response.success) throw new Error(`CKAN action failed: ${action}`);
+  return response.result;
 }
 async function loadPopulation(cache, townBoundaries) {
   const page = await fetchText(config.populationPageUrl, "utf8");
@@ -213,7 +328,11 @@ async function geocode(query) {
 }
 
 async function fetchJson(url) {
-  const response = await fetch(url);
+  const response = await fetch(url, {
+    headers: {
+      "User-Agent": "nagoya-park-age-map/0.1"
+    }
+  });
   if (!response.ok) throw new Error(`${response.status} ${url}`);
   return response.json();
 }
@@ -226,6 +345,19 @@ async function fetchText(url, encoding) {
 }
 
 function parseCsv(text) {
+  const rows = parseCsvRows(text);
+  const headerIndex = rows.findIndex((items) => items.includes("No.") || items.some((item) => item.includes("名称")));
+  const header = rows[headerIndex]?.map((item) => item.replace(/\s+/g, "")) ?? [];
+  return rows.slice(headerIndex + 1).map((items) => Object.fromEntries(header.map((key, index) => [key, items[index]])));
+}
+
+function parseCsvRecords(text) {
+  const rows = parseCsvRows(text).filter((row) => row.some((cell) => clean(cell)));
+  const header = rows[0]?.map((item) => clean(item)) ?? [];
+  return rows.slice(1).map((items) => Object.fromEntries(header.map((key, index) => [key, items[index] ?? ""])));
+}
+
+function parseCsvRows(text) {
   const rows = [];
   let row = [];
   let cell = "";
@@ -255,10 +387,7 @@ function parseCsv(text) {
     row.push(clean(cell));
     rows.push(row);
   }
-
-  const headerIndex = rows.findIndex((items) => items.includes("No.") || items.some((item) => item.includes("名称")));
-  const header = rows[headerIndex]?.map((item) => item.replace(/\s+/g, "")) ?? [];
-  return rows.slice(headerIndex + 1).map((items) => Object.fromEntries(header.map((key, index) => [key, items[index]])));
+  return rows;
 }
 
 function clean(value) {
@@ -278,9 +407,81 @@ function slug(value) {
   return String(value).normalize("NFKC").replace(/[^\p{Letter}\p{Number}]+/gu, "-").replace(/^-|-$/g, "").toLowerCase();
 }
 
+function normalizeParkName(value) {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .replace(/\([^)]*\)|\uFF08[^\uFF09]*\uFF09/g, "")
+    .replace(/[\s\u3000]+/g, "")
+    .replace(/\u30B1/g, "\u30F6");
+}
+
+function parkNameKeys(value) {
+  const name = normalizeParkName(value);
+  return [...new Set([
+    name,
+    name.replace(/\u516C\u5712$/, "")
+  ].filter((key) => key.length >= 2))];
+}
+
+function normalizeAddress(value) {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .replace(/[\s\u3000]+/g, "");
+}
+
+function distanceMeters(lat1, lon1, lat2, lon2) {
+  const radius = 6371000;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * radius * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function toRad(degrees) {
+  return (degrees * Math.PI) / 180;
+}
+
+function assertUsableData(data) {
+  if (!Array.isArray(data.parks) || data.parks.length === 0) {
+    throw new Error("Fetched data has no parks. Existing JSON was not overwritten.");
+  }
+  if (!Array.isArray(data.towns) || data.towns.length === 0) {
+    throw new Error("Fetched data has no towns. Existing JSON was not overwritten.");
+  }
+  if (!data.meta.updatedAt) {
+    throw new Error("Fetched data has no updatedAt. Existing JSON was not overwritten.");
+  }
+}
+
+async function writeJsonAtomic(url, data) {
+  const tempUrl = new URL(`${url.pathname}.${process.pid}.tmp`, url);
+  try {
+    await writeFile(tempUrl, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+    try {
+      await rename(tempUrl, url);
+    } catch (error) {
+      if (error.code !== "EEXIST" && error.code !== "EPERM") throw error;
+      await rm(url, { force: true });
+      await rename(tempUrl, url);
+    }
+  } catch (error) {
+    await rm(tempUrl, { force: true }).catch(() => {});
+    throw error;
+  }
+}
+
 async function readJson(url, fallback) {
   try {
     return JSON.parse(await readFile(url, "utf8"));
+  } catch {
+    return fallback;
+  }
+}
+
+async function readText(url, fallback) {
+  try {
+    return await readFile(url, "utf8");
   } catch {
     return fallback;
   }

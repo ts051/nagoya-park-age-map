@@ -8,5 +8,5 @@
   "populationAsOf": "2026-06-01",
   "parksAsOf": "2025-04-01",
   "townGeoJsonPath": "./data/town-boundaries.geojson",
-  "sourceCredit": "名古屋市公式サイト、統計なごやweb版、Geoshapeリポジトリ（e-Stat国勢調査町丁・字等別境界データ）"
+  "sourceCredit": "名古屋市公式サイト、統計なごやweb版、Geoshapeリポジトリ（e-Stat国勢調査町丁・字等別境界データ）、OpenStreetMap"
 }
