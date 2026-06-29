@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>公園座標レビュー</title>
+    <link rel="stylesheet" href="./vendor/leaflet/leaflet.css">
+    <style>
+      :root {
+        color-scheme: light;
+        --border: #d7ded7;
+        --text: #17211b;
+        --muted: #69756e;
+        --bg: #f6f8f6;
+        --panel: #ffffff;
+        --accent: #267a46;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: var(--text);
+        background: var(--bg);
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 360px 1fr;
+        min-height: 100vh;
+      }
+
+      .sidebar {
+        border-right: 1px solid var(--border);
+        background: var(--panel);
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .toolbar {
+        padding: 14px;
+        border-bottom: 1px solid var(--border);
+        display: grid;
+        gap: 10px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 18px;
+      }
+
+      .controls {
+        display: grid;
+        grid-template-columns: 1fr 124px;
+        gap: 8px;
+      }
+
+      input,
+      select {
+        width: 100%;
+        min-height: 34px;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px 8px;
+        background: #fff;
+        color: var(--text);
+      }
+
+      .count {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .list {
+        overflow: auto;
+        padding: 8px;
+      }
+
+      .item {
+        width: 100%;
+        border: 1px solid transparent;
+        border-radius: 6px;
+        background: transparent;
+        text-align: left;
+        padding: 8px;
+        display: grid;
+        gap: 3px;
+        cursor: pointer;
+      }
+
+      .item:hover,
+      .item.is-active {
+        border-color: var(--border);
+        background: #eef5ef;
+      }
+
+      .item strong {
+        font-size: 14px;
+      }
+
+      .item span {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .main {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr);
+        min-width: 0;
+      }
+
+      .detail {
+        background: var(--panel);
+        border-bottom: 1px solid var(--border);
+        padding: 12px 16px;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 12px;
+        align-items: center;
+      }
+
+      .detail h2 {
+        margin: 0 0 4px;
+        font-size: 18px;
+      }
+
+      .meta {
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: flex-end;
+      }
+
+      .actions a {
+        display: inline-flex;
+        min-height: 34px;
+        align-items: center;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px 10px;
+        color: var(--accent);
+        background: #fff;
+        text-decoration: none;
+        font-weight: 600;
+        font-size: 13px;
+      }
+
+      .review-grid {
+        display: grid;
+        grid-template-columns: minmax(360px, 0.9fr) minmax(420px, 1.1fr);
+        min-height: 0;
+      }
+
+      #map {
+        min-height: 0;
+      }
+
+      iframe {
+        width: 100%;
+        height: 100%;
+        border: 0;
+        border-left: 1px solid var(--border);
+        background: #fff;
+      }
+
+      @media (max-width: 920px) {
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        .sidebar {
+          min-height: 38vh;
+          border-right: 0;
+          border-bottom: 1px solid var(--border);
+        }
+
+        .review-grid {
+          grid-template-columns: 1fr;
+          grid-template-rows: 52vh 52vh;
+        }
+
+        iframe {
+          border-left: 0;
+          border-top: 1px solid var(--border);
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="toolbar">
+          <h1>公園座標レビュー</h1>
+          <div class="controls">
+            <input id="search" type="search" placeholder="公園名・住所">
+            <select id="ward"></select>
+          </div>
+          <div id="count" class="count"></div>
+        </div>
+        <div id="list" class="list"></div>
+      </aside>
+      <main class="main">
+        <section class="detail">
+          <div>
+            <h2 id="name">読み込み中</h2>
+            <div id="meta" class="meta"></div>
+          </div>
+          <div class="actions">
+            <a id="official-link" href="#" target="_blank" rel="noopener">公式配置図</a>
+            <a id="google-link" href="#" target="_blank" rel="noopener">Google確認</a>
+          </div>
+        </section>
+        <section class="review-grid">
+          <div id="map"></div>
+          <iframe id="official-map" title="名古屋市公式 公園配置図"></iframe>
+        </section>
+      </main>
+    </div>
+    <script src="./vendor/leaflet/leaflet.js"></script>
+    <script>
+      const state = {
+        rows: [],
+        filtered: [],
+        active: null,
+        marker: null
+      };
+
+      const map = L.map("map").setView([35.1815, 136.9066], 11);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
+        attribution: "&copy; OpenStreetMap contributors"
+      }).addTo(map);
+
+      init();
+
+      async function init() {
+        const csv = await fetch("./data/park-coordinate-review.csv").then((response) => response.text());
+        state.rows = parseCsv(csv);
+        populateWardFilter();
+        document.querySelector("#search").addEventListener("input", applyFilters);
+        document.querySelector("#ward").addEventListener("change", applyFilters);
+        applyFilters();
+      }
+
+      function populateWardFilter() {
+        const wards = [...new Set(state.rows.map((row) => row.ward).filter(Boolean))].sort();
+        document.querySelector("#ward").innerHTML = [
+          "<option value=\"\">全区</option>",
+          ...wards.map((ward) => `<option value="${escapeHtml(ward)}">${escapeHtml(ward)}</option>`)
+        ].join("");
+      }
+
+      function applyFilters() {
+        const query = document.querySelector("#search").value.trim();
+        const ward = document.querySelector("#ward").value;
+        state.filtered = state.rows.filter((row) => {
+          if (ward && row.ward !== ward) return false;
+          if (!query) return true;
+          return `${row.name} ${row.address}`.includes(query);
+        });
+        renderList();
+        selectRow(state.filtered[0] ?? null);
+      }
+
+      function renderList() {
+        document.querySelector("#count").textContent = `${state.filtered.length.toLocaleString("ja-JP")} 件`;
+        document.querySelector("#list").innerHTML = state.filtered.map((row, index) => `
+          <button class="item${state.active?.id === row.id ? " is-active" : ""}" data-index="${index}" type="button">
+            <strong>${escapeHtml(row.name)}</strong>
+            <span>${escapeHtml(row.ward)} / ${escapeHtml(row.address)}</span>
+          </button>
+        `).join("");
+        document.querySelectorAll(".item").forEach((button) => {
+          button.addEventListener("click", () => selectRow(state.filtered[Number(button.dataset.index)]));
+        });
+      }
+
+      function selectRow(row) {
+        state.active = row;
+        renderList();
+        if (!row) return;
+
+        document.querySelector("#name").textContent = row.name;
+        document.querySelector("#meta").textContent = `${row.ward} / ${row.address} / ${row.coordinateSource} / ${row.lat}, ${row.lng}`;
+        document.querySelector("#official-link").href = row.officialMapUrl;
+        document.querySelector("#google-link").href = row.googleMapsSearchUrl;
+        document.querySelector("#official-map").src = row.officialMapUrl;
+
+        const latlng = [Number(row.lat), Number(row.lng)];
+        if (!state.marker) {
+          state.marker = L.marker(latlng).addTo(map);
+        } else {
+          state.marker.setLatLng(latlng);
+        }
+        state.marker.bindTooltip(row.name, { permanent: true, direction: "top" }).openTooltip();
+        map.setView(latlng, 16);
+      }
+
+      function parseCsv(text) {
+        const rows = [];
+        let row = [];
+        let cell = "";
+        let quoted = false;
+        for (let i = 0; i < text.length; i += 1) {
+          const char = text[i];
+          const next = text[i + 1];
+          if (char === "\"" && quoted && next === "\"") {
+            cell += "\"";
+            i += 1;
+          } else if (char === "\"") {
+            quoted = !quoted;
+          } else if (char === "," && !quoted) {
+            row.push(cell);
+            cell = "";
+          } else if ((char === "\n" || char === "\r") && !quoted) {
+            if (char === "\r" && next === "\n") i += 1;
+            row.push(cell);
+            rows.push(row);
+            row = [];
+            cell = "";
+          } else {
+            cell += char;
+          }
+        }
+        if (cell || row.length) {
+          row.push(cell);
+          rows.push(row);
+        }
+        const header = rows.shift() ?? [];
+        return rows
+          .filter((items) => items.some(Boolean))
+          .map((items) => Object.fromEntries(header.map((key, index) => [key, items[index] ?? ""])));
+      }
+
+      function escapeHtml(value) {
+        return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          "\"": "&quot;",
+          "'": "&#39;"
+        }[char]));
+      }
+    </script>
+  </body>
+</html>
