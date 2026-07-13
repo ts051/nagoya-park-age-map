@@ -13,14 +13,20 @@
       <aside class="sidebar">
         <header class="brand">
           <span class="brand-mark" aria-hidden="true">◎</span>
-          <div>
+          <div class="brand-content">
             <p class="eyebrow">CLICK · DRAW · NOTE</p>
             <h1>Radius Note Map</h1>
             <p class="lead">地図をクリックして、地点・半径・メモを登録します。</p>
+            <div class="mode-row">
+              <span class="mode-badge" id="mode-badge">閲覧モード</span>
+              <button class="text-button" id="mode-button" type="button">地点登録モードへ</button>
+            </div>
           </div>
         </header>
 
-        <section class="editor" aria-labelledby="editor-title">
+        <div class="connection-message" id="connection-message" hidden></div>
+
+        <section class="editor" id="editor-panel" aria-labelledby="editor-title" hidden>
           <div class="section-heading">
             <h2 id="editor-title">地点を登録</h2>
             <span id="editor-status" class="status">地図をクリック</span>
@@ -60,6 +66,16 @@
           <div class="place-list" id="place-list"></div>
           <button class="text-button danger" id="clear-button" type="button" hidden>すべて削除</button>
         </section>
+
+        <section class="password-panel" id="password-panel" hidden aria-labelledby="password-title">
+          <h2 id="password-title">管理パスワードを変更</h2>
+          <label>
+            新しいパスワード
+            <input id="new-password-input" type="password" minlength="4" autocomplete="new-password" />
+          </label>
+          <button class="button ghost" id="change-password-button" type="button">パスワードを変更</button>
+          <p class="hint" id="password-message"></p>
+        </section>
       </aside>
 
       <section class="map-panel" aria-label="地点登録地図">
@@ -68,7 +84,24 @@
       </section>
     </main>
 
+    <dialog class="auth-dialog" id="auth-dialog">
+      <form method="dialog" id="auth-form">
+        <div class="section-heading">
+          <h2>地点登録モード</h2>
+          <button class="dialog-close" value="cancel" type="submit" aria-label="閉じる">×</button>
+        </div>
+        <p class="dialog-copy">管理パスワードを入力してください。</p>
+        <label>
+          パスワード
+          <input id="password-input" type="password" autocomplete="current-password" required />
+        </label>
+        <p class="form-error" id="auth-error" role="alert"></p>
+        <button class="button primary" id="login-button" value="default" type="submit">切り替える</button>
+      </form>
+    </dialog>
+
     <script src="./vendor/leaflet/leaflet.js"></script>
+    <script src="./config.js"></script>
     <script src="./app.js" type="module"></script>
   </body>
 </html>

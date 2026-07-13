@@ -1,5 +1,6 @@
-const STORAGE_KEY = "radius-note-map.places.v1";
 const DEFAULT_CENTER = [35.1815, 136.9066];
+const LEGACY_STORAGE_KEY = "radius-note-map.places.v1";
+const API_URL = window.RADIUS_NOTE_MAP_CONFIG?.functionUrl?.replace(/\/$/, "") || "";
 
 const map = L.map("map", { zoomControl: false }).setView(DEFAULT_CENTER, 12);
 L.control.zoom({ position: "bottomright" }).addTo(map);
@@ -20,11 +21,25 @@ const elements = {
   list: document.querySelector("#place-list"),
   count: document.querySelector("#place-count"),
   clear: document.querySelector("#clear-button"),
-  guide: document.querySelector("#map-guide")
+  guide: document.querySelector("#map-guide"),
+  editor: document.querySelector("#editor-panel"),
+  modeBadge: document.querySelector("#mode-badge"),
+  modeButton: document.querySelector("#mode-button"),
+  connection: document.querySelector("#connection-message"),
+  authDialog: document.querySelector("#auth-dialog"),
+  authForm: document.querySelector("#auth-form"),
+  password: document.querySelector("#password-input"),
+  authError: document.querySelector("#auth-error"),
+  loginButton: document.querySelector("#login-button"),
+  passwordPanel: document.querySelector("#password-panel"),
+  newPassword: document.querySelector("#new-password-input"),
+  changePassword: document.querySelector("#change-password-button"),
+  passwordMessage: document.querySelector("#password-message")
 };
 
 const state = {
-  places: loadPlaces(),
+  places: [],
+  adminToken: null,
   draft: null,
   editingId: null,
   previewMarker: null,
@@ -32,15 +47,87 @@ const state = {
   layers: new Map()
 };
 
-map.on("click", ({ latlng }) => beginNewPlace(latlng));
+map.on("click", ({ latlng }) => {
+  if (isAdmin()) beginNewPlace(latlng);
+});
 elements.radius.addEventListener("input", updatePreviewRadius);
 elements.save.addEventListener("click", savePlace);
 elements.cancel.addEventListener("click", resetEditor);
 elements.clear.addEventListener("click", clearAllPlaces);
+elements.modeButton.addEventListener("click", toggleMode);
+elements.authForm.addEventListener("submit", authenticate);
+elements.changePassword.addEventListener("click", changePassword);
 
-renderPlaces();
-renderList();
-fitSavedPlaces();
+main();
+
+async function main() {
+  renderMode();
+  if (!API_URL) {
+    showConnectionMessage("Supabaseの接続先が未設定です。config.js にEdge FunctionのURLを設定してください。");
+    renderList();
+    return;
+  }
+  await reloadPlaces(true);
+}
+
+function isAdmin() {
+  return Boolean(state.adminToken);
+}
+
+function toggleMode() {
+  if (isAdmin()) {
+    leaveAdminMode();
+    return;
+  }
+  elements.authError.textContent = "";
+  elements.password.value = "";
+  elements.authDialog.showModal();
+  elements.password.focus();
+}
+
+async function authenticate(event) {
+  event.preventDefault();
+  if (event.submitter?.value === "cancel") {
+    elements.authDialog.close();
+    return;
+  }
+  const password = elements.password.value;
+  if (!password) return;
+  elements.loginButton.disabled = true;
+  elements.authError.textContent = "";
+  try {
+    const result = await apiRequest("login", { password });
+    state.adminToken = result.token;
+    elements.password.value = "";
+    elements.authDialog.close();
+    renderMode();
+    renderPlaces();
+    renderList();
+    await migrateLegacyPlaces();
+  } catch (error) {
+    elements.authError.textContent = error.message;
+  } finally {
+    elements.loginButton.disabled = false;
+  }
+}
+
+function leaveAdminMode() {
+  state.adminToken = null;
+  resetEditor();
+  renderMode();
+  renderPlaces();
+  renderList();
+}
+
+function renderMode() {
+  const admin = isAdmin();
+  elements.modeBadge.textContent = admin ? "地点登録モード" : "閲覧モード";
+  elements.modeBadge.classList.toggle("admin", admin);
+  elements.modeButton.textContent = admin ? "閲覧モードへ" : "地点登録モードへ";
+  elements.editor.hidden = !admin;
+  elements.passwordPanel.hidden = !admin;
+  elements.guide.textContent = admin ? "地図上の登録したい場所をクリック" : "閲覧モード：地点をクリックして内容を確認";
+}
 
 function beginNewPlace(latlng) {
   state.editingId = null;
@@ -53,6 +140,7 @@ function beginNewPlace(latlng) {
 }
 
 function editPlace(id) {
+  if (!isAdmin()) return;
   const place = state.places.find((item) => item.id === id);
   if (!place) return;
   state.editingId = id;
@@ -70,7 +158,7 @@ function editPlace(id) {
 function showDraft(status) {
   clearPreview();
   const latlng = [state.draft.lat, state.draft.lng];
-  state.previewCircle = L.circle(latlng, circleStyle(Number(elements.radius.value))).addTo(map);
+  state.previewCircle = L.circle(latlng, circleStyle(normalizedRadius())).addTo(map);
   state.previewMarker = L.marker(latlng, { icon: pointIcon(true) }).addTo(map);
   elements.coordinates.textContent = `${state.draft.lat.toFixed(6)}, ${state.draft.lng.toFixed(6)}`;
   elements.status.textContent = status;
@@ -82,14 +170,13 @@ function showDraft(status) {
 }
 
 function updatePreviewRadius() {
-  if (!state.previewCircle) return;
-  state.previewCircle.setRadius(normalizedRadius());
+  if (state.previewCircle) state.previewCircle.setRadius(normalizedRadius());
 }
 
-function savePlace() {
-  if (!state.draft) return;
-  const place = {
-    id: state.editingId || crypto.randomUUID(),
+async function savePlace() {
+  if (!state.draft || !isAdmin()) return;
+  const payload = {
+    id: state.editingId || undefined,
     lat: state.draft.lat,
     lng: state.draft.lng,
     name: elements.name.value.trim() || `地点 ${state.places.length + 1}`,
@@ -97,14 +184,17 @@ function savePlace() {
     radius: normalizedRadius(),
     memo: elements.memo.value.trim()
   };
-  const index = state.places.findIndex((item) => item.id === place.id);
-  if (index >= 0) state.places[index] = place;
-  else state.places.push(place);
-  persist();
-  resetEditor();
-  renderPlaces();
-  renderList();
-  focusPlace(place.id);
+  elements.save.disabled = true;
+  try {
+    const result = await apiRequest(state.editingId ? "update" : "create", { place: payload }, true);
+    resetEditor();
+    await reloadPlaces();
+    focusPlace(result.place.id);
+  } catch (error) {
+    handleApiError(error);
+  } finally {
+    if (state.draft) elements.save.disabled = false;
+  }
 }
 
 function resetEditor() {
@@ -120,8 +210,50 @@ function resetEditor() {
   elements.save.textContent = "この地点を登録";
   elements.save.disabled = true;
   elements.cancel.disabled = true;
-  elements.guide.textContent = "地図上の登録したい場所をクリック";
-  renderPlaces();
+  renderMode();
+}
+
+async function reloadPlaces(fit = false) {
+  try {
+    const result = await apiRequest("list");
+    state.places = result.places;
+    hideConnectionMessage();
+    renderPlaces();
+    renderList();
+    if (fit) fitSavedPlaces();
+  } catch (error) {
+    showConnectionMessage(`地点データを読み込めませんでした。${error.message}`);
+    renderList();
+  }
+}
+
+async function migrateLegacyPlaces() {
+  let legacyPlaces;
+  try {
+    legacyPlaces = JSON.parse(localStorage.getItem(LEGACY_STORAGE_KEY) || "[]");
+  } catch {
+    return;
+  }
+  if (!Array.isArray(legacyPlaces) || !legacyPlaces.length) return;
+  if (!confirm(`このブラウザに保存されている${legacyPlaces.length}件の地点をサーバーへ移行しますか？`)) return;
+  try {
+    for (const place of legacyPlaces) {
+      await apiRequest("create", {
+        place: {
+          lat: Number(place.lat),
+          lng: Number(place.lng),
+          name: String(place.name || "移行地点").slice(0, 60),
+          showName: place.showName !== false,
+          radius: Math.min(50000, Math.max(10, Math.round(Number(place.radius) || 500))),
+          memo: String(place.memo || "").slice(0, 200)
+        }
+      }, true);
+    }
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+    await reloadPlaces(true);
+  } catch (error) {
+    showConnectionMessage(`ブラウザ保存データの移行に失敗しました。${error.message}`);
+  }
 }
 
 function renderPlaces() {
@@ -142,7 +274,8 @@ function renderPlaces() {
     marker.bindTooltip(label, { permanent, direction: "right", offset: [13, 0], className: "note-label" });
     marker.on("click", (event) => {
       L.DomEvent.stopPropagation(event);
-      editPlace(place.id);
+      if (isAdmin()) editPlace(place.id);
+      else focusPlace(place.id);
     });
     state.layers.set(place.id, { marker, circle });
   }
@@ -150,9 +283,9 @@ function renderPlaces() {
 
 function renderList() {
   elements.count.textContent = String(state.places.length);
-  elements.clear.hidden = state.places.length === 0;
+  elements.clear.hidden = !isAdmin() || state.places.length === 0;
   if (!state.places.length) {
-    elements.list.innerHTML = '<div class="empty">まだ地点がありません。<br>地図をクリックして登録してください。</div>';
+    elements.list.innerHTML = '<div class="empty">登録地点はありません。</div>';
     return;
   }
   elements.list.innerHTML = state.places.map((place) => `
@@ -161,10 +294,10 @@ function renderList() {
         <span class="place-name">${escapeHtml(place.name)}</span>
         <span class="place-meta">半径 ${place.radius.toLocaleString("ja-JP")}m${showsName(place) ? " · 地点名表示" : ""}${place.memo ? " · メモあり" : ""}</span>
       </button>
-      <span class="place-actions">
+      ${isAdmin() ? `<span class="place-actions">
         <button class="edit-one" type="button" data-edit="${place.id}" aria-label="${escapeHtml(place.name)}を編集">編集</button>
         <button class="delete-one" type="button" data-delete="${place.id}" aria-label="${escapeHtml(place.name)}を削除">×</button>
-      </span>
+      </span>` : ""}
     </article>`).join("");
   elements.list.querySelectorAll("[data-focus]").forEach((button) => button.addEventListener("click", () => focusPlace(button.dataset.focus)));
   elements.list.querySelectorAll("[data-edit]").forEach((button) => button.addEventListener("click", () => editPlace(button.dataset.edit)));
@@ -175,26 +308,78 @@ function focusPlace(id) {
   const place = state.places.find((item) => item.id === id);
   if (!place) return;
   map.setView([place.lat, place.lng], zoomForRadius(place.radius), { animate: true });
-  if (!place.memo) state.layers.get(id)?.marker.openTooltip();
+  if (!place.memo && !showsName(place)) state.layers.get(id)?.marker.openTooltip();
 }
 
-function deletePlace(id) {
+async function deletePlace(id) {
   const place = state.places.find((item) => item.id === id);
   if (!place || !confirm(`「${place.name}」を削除しますか？`)) return;
-  state.places = state.places.filter((item) => item.id !== id);
-  persist();
-  if (state.editingId === id) resetEditor();
-  renderPlaces();
-  renderList();
+  try {
+    await apiRequest("delete", { id }, true);
+    if (state.editingId === id) resetEditor();
+    await reloadPlaces();
+  } catch (error) {
+    handleApiError(error);
+  }
 }
 
-function clearAllPlaces() {
+async function clearAllPlaces() {
   if (!confirm("登録地点をすべて削除しますか？")) return;
-  state.places = [];
-  persist();
-  resetEditor();
-  renderPlaces();
-  renderList();
+  try {
+    await apiRequest("clear", {}, true);
+    resetEditor();
+    await reloadPlaces();
+  } catch (error) {
+    handleApiError(error);
+  }
+}
+
+async function changePassword() {
+  const newPassword = elements.newPassword.value;
+  elements.passwordMessage.textContent = "";
+  if (newPassword.length < 4) {
+    elements.passwordMessage.textContent = "4文字以上で入力してください。";
+    return;
+  }
+  elements.changePassword.disabled = true;
+  try {
+    const result = await apiRequest("changePassword", { newPassword }, true);
+    state.adminToken = result.token;
+    elements.newPassword.value = "";
+    elements.passwordMessage.textContent = "パスワードを変更しました。";
+  } catch (error) {
+    handleApiError(error);
+  } finally {
+    elements.changePassword.disabled = false;
+  }
+}
+
+function handleApiError(error) {
+  if (error.status === 401) {
+    leaveAdminMode();
+    showConnectionMessage("管理セッションの有効期限が切れました。もう一度パスワードを入力してください。");
+    return;
+  }
+  showConnectionMessage(error.message);
+}
+
+async function apiRequest(action, payload = {}, authenticated = false) {
+  if (!API_URL) throw new Error("Supabase接続先が未設定です。");
+  const headers = { "Content-Type": "application/json" };
+  if (authenticated && state.adminToken) headers.Authorization = `Bearer ${state.adminToken}`;
+  let response;
+  try {
+    response = await fetch(API_URL, { method: "POST", headers, body: JSON.stringify({ action, ...payload }) });
+  } catch {
+    throw new Error("サーバーに接続できません。");
+  }
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const error = new Error(result.error || "サーバー処理に失敗しました。");
+    error.status = response.status;
+    throw error;
+  }
+  return result;
 }
 
 function fitSavedPlaces() {
@@ -235,21 +420,14 @@ function zoomForRadius(radius) {
   return 11;
 }
 
-function persist() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.places));
+function showConnectionMessage(message) {
+  elements.connection.textContent = message;
+  elements.connection.hidden = false;
 }
 
-function loadPlaces() {
-  try {
-    const value = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]");
-    return Array.isArray(value) ? value.filter(isValidPlace) : [];
-  } catch {
-    return [];
-  }
-}
-
-function isValidPlace(place) {
-  return place && typeof place.id === "string" && Number.isFinite(place.lat) && Number.isFinite(place.lng) && Number.isFinite(place.radius);
+function hideConnectionMessage() {
+  elements.connection.hidden = true;
+  elements.connection.textContent = "";
 }
 
 function escapeHtml(value) {
