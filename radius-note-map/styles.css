@@ -39,6 +39,7 @@ button, input, textarea { font: inherit; }
 }
 
 .brand { display: flex; gap: 13px; align-items: flex-start; }
+.brand-content { flex: 1; min-width: 0; }
 .brand-mark {
   display: grid;
   flex: 0 0 44px;
@@ -55,9 +56,15 @@ button, input, textarea { font: inherit; }
 .eyebrow { margin: 1px 0 4px; color: var(--accent); font-size: 10px; font-weight: 800; letter-spacing: .15em; }
 h1 { margin: 0; font-size: 23px; line-height: 1.2; letter-spacing: -.02em; }
 .lead { margin: 7px 0 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.mode-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+.mode-badge { padding: 5px 10px; border-radius: 999px; color: #435b55; background: #edf2f0; font-size: 11px; font-weight: 800; }
+.mode-badge.admin { color: white; background: var(--green); }
+.connection-message { margin-top: 18px; padding: 11px 13px; border: 1px solid #e7c99a; border-radius: 10px; color: #74490c; background: #fff7e9; font-size: 12px; line-height: 1.5; }
 
-.editor, .places { margin-top: 26px; }
+.editor, .places, .password-panel { margin-top: 26px; }
 .editor { padding: 18px; border: 1px solid var(--line); border-radius: 18px; background: #f8fbf9; }
+.password-panel { padding-top: 18px; border-top: 1px solid var(--line); }
+.password-panel .button { margin-top: 12px; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 h2 { margin: 0; font-size: 15px; }
 .status, .count { padding: 4px 9px; border-radius: 999px; color: var(--green); background: var(--mint); font-size: 11px; font-weight: 700; }
@@ -102,7 +109,15 @@ input:focus, textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px 
 .delete-one { border: 0; padding: 5px; color: #81908c; background: none; cursor: pointer; font-size: 18px; }
 .delete-one:hover { color: var(--danger); }
 .text-button { margin-top: 12px; border: 0; padding: 0; background: none; cursor: pointer; font-size: 12px; }
+.mode-row .text-button { margin-top: 0; color: var(--green); font-weight: 700; }
 .danger { color: var(--danger); }
+
+.auth-dialog { width: min(390px, calc(100% - 32px)); border: 0; border-radius: 18px; padding: 0; color: var(--ink); box-shadow: 0 24px 70px rgba(24,49,45,.3); }
+.auth-dialog::backdrop { background: rgba(15,35,31,.48); backdrop-filter: blur(3px); }
+.auth-dialog form { display: grid; gap: 14px; padding: 22px; }
+.dialog-close { width: 30px; height: 30px; border: 0; border-radius: 50%; color: var(--muted); background: #edf2f0; cursor: pointer; font-size: 20px; }
+.dialog-copy { margin: 0; color: var(--muted); font-size: 13px; }
+.form-error { min-height: 18px; margin: 0; color: var(--danger); font-size: 12px; }
 
 .map-panel, #map { min-width: 0; height: 100%; }
 .map-panel { position: relative; }

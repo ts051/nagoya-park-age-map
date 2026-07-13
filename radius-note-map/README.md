@@ -1,6 +1,6 @@
 # Radius Note Map
 
-地図上をクリックして地点を登録し、指定した半径の円とテキストメモを表示する静的Webアプリです。
+地図上をクリックして地点を登録し、指定した半径の円とテキストメモを表示するWebアプリです。地点データと管理認証はSupabaseに保存されるため、どの端末でも同じ内容を閲覧できます。
 
 ## 起動
 
@@ -10,7 +10,7 @@ npm install
 npm run dev
 ```
 
-表示されたURLをブラウザで開きます。登録内容はブラウザの `localStorage` に保存されます。
+表示されたURLをブラウザで開きます。デフォルトは閲覧モードです。「地点登録モードへ」から管理パスワードを入力すると登録・編集・削除ができます。初期パスワードは `test` です。初回ログイン後、画面下部から必ず変更してください。
 
 ## 主な操作
 
@@ -22,3 +22,11 @@ npm run dev
 - 一覧から地点へ移動、個別削除、全削除
 
 公園・人口など、元アプリ固有のデータは使用していません。
+
+## Supabase構成
+
+- `supabase/migrations/`: 地点、設定、ログイン試行テーブルと認証用SQL関数
+- `supabase/functions/places-api/`: 公開閲覧APIと管理操作API
+- `config.js`: デプロイ済みEdge FunctionのURL
+
+Edge Functionの管理セッション署名鍵はSupabase Secretsの `ADMIN_SESSION_SECRET` に保存し、公開コードには含めません。
