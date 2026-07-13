@@ -10,6 +10,7 @@ L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
 
 const elements = {
   name: document.querySelector("#name-input"),
+  showName: document.querySelector("#show-name-input"),
   radius: document.querySelector("#radius-input"),
   memo: document.querySelector("#memo-input"),
   coordinates: document.querySelector("#coordinates"),
@@ -45,6 +46,7 @@ function beginNewPlace(latlng) {
   state.editingId = null;
   state.draft = { lat: latlng.lat, lng: latlng.lng };
   elements.name.value = "";
+  elements.showName.checked = true;
   elements.memo.value = "";
   elements.radius.value = "500";
   showDraft("新規地点");
@@ -56,6 +58,7 @@ function editPlace(id) {
   state.editingId = id;
   state.draft = { lat: place.lat, lng: place.lng };
   elements.name.value = place.name;
+  elements.showName.checked = showsName(place);
   elements.memo.value = place.memo;
   elements.radius.value = String(place.radius);
   showDraft("編集中");
@@ -90,6 +93,7 @@ function savePlace() {
     lat: state.draft.lat,
     lng: state.draft.lng,
     name: elements.name.value.trim() || `地点 ${state.places.length + 1}`,
+    showName: elements.showName.checked,
     radius: normalizedRadius(),
     memo: elements.memo.value.trim()
   };
@@ -108,6 +112,7 @@ function resetEditor() {
   state.editingId = null;
   clearPreview();
   elements.name.value = "";
+  elements.showName.checked = true;
   elements.memo.value = "";
   elements.radius.value = "500";
   elements.coordinates.textContent = "緯度・経度は未選択です";
@@ -129,13 +134,13 @@ function renderPlaces() {
     const selected = place.id === state.editingId;
     const circle = L.circle([place.lat, place.lng], circleStyle(place.radius)).addTo(map);
     const marker = L.marker([place.lat, place.lng], { icon: pointIcon(selected), title: place.name }).addTo(map);
-    const label = `<div class="note-card"><strong>${escapeHtml(place.name)}</strong>${place.memo ? `<br>${escapeHtml(place.memo)}` : ""}</div>`;
-    marker.bindTooltip(label, { permanent: Boolean(place.memo), direction: "right", offset: [13, 0], className: "note-label" });
+    const showName = showsName(place);
+    const permanent = showName || Boolean(place.memo);
+    const nameText = showName || !place.memo ? `<strong>${escapeHtml(place.name)}</strong>` : "";
+    const separator = nameText && place.memo ? "<br>" : "";
+    const label = `<div class="note-card">${nameText}${separator}${escapeHtml(place.memo)}</div>`;
+    marker.bindTooltip(label, { permanent, direction: "right", offset: [13, 0], className: "note-label" });
     marker.on("click", (event) => {
-      L.DomEvent.stopPropagation(event);
-      editPlace(place.id);
-    });
-    circle.on("click", (event) => {
       L.DomEvent.stopPropagation(event);
       editPlace(place.id);
     });
@@ -154,7 +159,7 @@ function renderList() {
     <article class="place-item${place.id === state.editingId ? " is-editing" : ""}">
       <button class="place-main" type="button" data-focus="${place.id}">
         <span class="place-name">${escapeHtml(place.name)}</span>
-        <span class="place-meta">半径 ${place.radius.toLocaleString("ja-JP")}m${place.memo ? " · メモあり" : ""}</span>
+        <span class="place-meta">半径 ${place.radius.toLocaleString("ja-JP")}m${showsName(place) ? " · 地点名表示" : ""}${place.memo ? " · メモあり" : ""}</span>
       </button>
       <span class="place-actions">
         <button class="edit-one" type="button" data-edit="${place.id}" aria-label="${escapeHtml(place.name)}を編集">編集</button>
@@ -210,7 +215,11 @@ function pointIcon(selected = false) {
 }
 
 function circleStyle(radius) {
-  return { radius, color: "#174c45", fillColor: "#4ba58c", fillOpacity: .13, weight: 2 };
+  return { radius, color: "#174c45", fillColor: "#4ba58c", fillOpacity: .13, weight: 2, bubblingMouseEvents: true };
+}
+
+function showsName(place) {
+  return place.showName !== false;
 }
 
 function normalizedRadius() {

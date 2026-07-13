@@ -75,6 +75,9 @@ input, textarea {
   resize: vertical;
 }
 input:focus, textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(23, 76, 69, .11); }
+.check-field { display: flex; align-items: center; gap: 8px; color: var(--ink); cursor: pointer; }
+.check-field input { width: 17px; height: 17px; margin: 0; accent-color: var(--green); }
+.check-field input:focus { box-shadow: 0 0 0 3px rgba(23, 76, 69, .11); }
 .radius-field { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 8px; }
 .radius-field span { color: var(--ink); font-weight: 700; }
 
