@@ -61,6 +61,7 @@ function editPlace(id) {
   showDraft("編集中");
   map.setView([place.lat, place.lng], Math.max(map.getZoom(), 15), { animate: true });
   renderPlaces();
+  renderList();
 }
 
 function showDraft(status) {
@@ -134,6 +135,10 @@ function renderPlaces() {
       L.DomEvent.stopPropagation(event);
       editPlace(place.id);
     });
+    circle.on("click", (event) => {
+      L.DomEvent.stopPropagation(event);
+      editPlace(place.id);
+    });
     state.layers.set(place.id, { marker, circle });
   }
 }
@@ -146,14 +151,18 @@ function renderList() {
     return;
   }
   elements.list.innerHTML = state.places.map((place) => `
-    <article class="place-item">
+    <article class="place-item${place.id === state.editingId ? " is-editing" : ""}">
       <button class="place-main" type="button" data-focus="${place.id}">
         <span class="place-name">${escapeHtml(place.name)}</span>
         <span class="place-meta">半径 ${place.radius.toLocaleString("ja-JP")}m${place.memo ? " · メモあり" : ""}</span>
       </button>
-      <button class="delete-one" type="button" data-delete="${place.id}" aria-label="${escapeHtml(place.name)}を削除">×</button>
+      <span class="place-actions">
+        <button class="edit-one" type="button" data-edit="${place.id}" aria-label="${escapeHtml(place.name)}を編集">編集</button>
+        <button class="delete-one" type="button" data-delete="${place.id}" aria-label="${escapeHtml(place.name)}を削除">×</button>
+      </span>
     </article>`).join("");
   elements.list.querySelectorAll("[data-focus]").forEach((button) => button.addEventListener("click", () => focusPlace(button.dataset.focus)));
+  elements.list.querySelectorAll("[data-edit]").forEach((button) => button.addEventListener("click", () => editPlace(button.dataset.edit)));
   elements.list.querySelectorAll("[data-delete]").forEach((button) => button.addEventListener("click", () => deletePlace(button.dataset.delete)));
 }
 
