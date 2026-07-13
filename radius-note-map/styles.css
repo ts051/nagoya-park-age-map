@@ -89,9 +89,13 @@ input:focus, textarea:focus { border-color: var(--green); box-shadow: 0 0 0 3px 
 .place-list { display: grid; gap: 8px; margin-top: 12px; }
 .empty { padding: 22px 14px; border: 1px dashed #cbd8d3; border-radius: 12px; color: var(--muted); text-align: center; font-size: 12px; }
 .place-item { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 11px 12px; border: 1px solid var(--line); border-radius: 12px; background: white; }
+.place-item.is-editing { border-color: var(--green); background: #f3f9f6; box-shadow: 0 0 0 2px rgba(23, 76, 69, .08); }
 .place-main { min-width: 0; border: 0; padding: 0; color: inherit; background: none; text-align: left; cursor: pointer; }
 .place-name { display: block; overflow: hidden; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
 .place-meta { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+.place-actions { display: flex; align-items: center; gap: 3px; }
+.edit-one { border: 0; border-radius: 7px; padding: 5px 7px; color: var(--green); background: var(--mint); cursor: pointer; font-size: 11px; font-weight: 700; }
+.edit-one:hover { background: #cce9de; }
 .delete-one { border: 0; padding: 5px; color: #81908c; background: none; cursor: pointer; font-size: 18px; }
 .delete-one:hover { color: var(--danger); }
 .text-button { margin-top: 12px; border: 0; padding: 0; background: none; cursor: pointer; font-size: 12px; }
