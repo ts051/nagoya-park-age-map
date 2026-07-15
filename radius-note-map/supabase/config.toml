@@ -1,5 +1,0 @@
-project_id = "radius-note-map"
-
-[functions.places-api]
-verify_jwt = false
-
